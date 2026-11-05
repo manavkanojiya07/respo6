@@ -1,0 +1,156 @@
+# DATA SCIENCE CAPSTONE: DIABETES PROGRESSION REGRESSION
+# Install: pip install pandas numpy matplotlib seaborn scikit-learn
+ 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+ 
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split, KFold, cross_val_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score
+)
+ 
+# 1. LOAD DATA
+dataset = load_diabetes(as_frame=True)
+df = dataset.frame.copy()
+print("Shape:", df.shape)
+print(df.head())
+print(df.info())
+print("Missing values:\n", df.isnull().sum())
+print("Duplicate rows:", df.duplicated().sum())
+print(df.describe())
+ 
+# 2. DATA PREPARATION
+X = df.drop(columns=["target"])
+y = df["target"]
+ 
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.20, random_state=42
+)
+ 
+# 3. DEFINE MODELS
+linear_model = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", LinearRegression())
+])
+ 
+rf_model = RandomForestRegressor(
+    n_estimators=400,
+    min_samples_leaf=2,
+    random_state=42,
+    n_jobs=-1
+)
+ 
+# 4. TRAIN
+linear_model.fit(X_train, y_train)
+rf_model.fit(X_train, y_train)
+ 
+# 5. PREDICT
+pred_lr = linear_model.predict(X_test)
+pred_rf = rf_model.predict(X_test)
+ 
+# 6. EVALUATE
+def evaluate(name, actual, predicted):
+    mse = mean_squared_error(actual, predicted)
+    return {
+        "Model": name,
+        "MAE": mean_absolute_error(actual, predicted),
+        "MSE": mse,
+        "RMSE": np.sqrt(mse),
+        "R2": r2_score(actual, predicted)
+    }
+ 
+results = pd.DataFrame([
+    evaluate("Linear Regression", y_test, pred_lr),
+    evaluate("Random Forest", y_test, pred_rf)
+])
+print("\nTest results:\n", results.round(3))
+ 
+# 7. FIVE-FOLD CROSS-VALIDATION
+cv = KFold(n_splits=5, shuffle=True, random_state=42)
+for name, model in [
+    ("Linear Regression", linear_model),
+    ("Random Forest", rf_model)
+]:
+    scores = cross_val_score(model, X, y, cv=cv, scoring="r2")
+    print(name, "CV R2 mean:", scores.mean(),
+          "std:", scores.std())
+ 
+# 8. EXPLORATORY VISUALIZATIONS
+plt.figure(figsize=(8, 5))
+sns.histplot(y, bins=25, kde=True)
+plt.title("Distribution of Target")
+plt.xlabel("Diabetes progression target")
+plt.tight_layout()
+plt.show()
+ 
+plt.figure(figsize=(9, 7))
+sns.heatmap(df.corr(), cmap="coolwarm", center=0, annot=False)
+plt.title("Correlation Matrix")
+plt.tight_layout()
+plt.show()
+ 
+plt.figure(figsize=(7, 5))
+sns.scatterplot(data=df, x="bmi", y="target")
+plt.title("BMI vs Target")
+plt.tight_layout()
+plt.show()
+ 
+# 9. ACTUAL VS PREDICTED
+plt.figure(figsize=(6, 5))
+plt.scatter(y_test, pred_lr, alpha=0.7)
+low = min(y_test.min(), pred_lr.min())
+high = max(y_test.max(), pred_lr.max())
+plt.plot([low, high], [low, high], "r--")
+plt.xlabel("Actual")
+plt.ylabel("Predicted")
+plt.title("Linear Regression: Actual vs Predicted")
+plt.tight_layout()
+plt.show()
+ 
+plt.figure(figsize=(6, 5))
+plt.scatter(y_test, pred_rf, alpha=0.7)
+low = min(y_test.min(), pred_rf.min())
+high = max(y_test.max(), pred_rf.max())
+plt.plot([low, high], [low, high], "r--")
+plt.xlabel("Actual")
+plt.ylabel("Predicted")
+plt.title("Random Forest: Actual vs Predicted")
+plt.tight_layout()
+plt.show()
+ 
+# 10. RESIDUAL ANALYSIS
+residuals = y_test - pred_lr
+plt.figure(figsize=(7, 5))
+plt.scatter(pred_lr, residuals, alpha=0.7)
+plt.axhline(0, color="red", linestyle="--")
+plt.xlabel("Predicted target")
+plt.ylabel("Residual")
+plt.title("Residual Plot - Linear Regression")
+plt.tight_layout()
+plt.show()
+ 
+# 11. FEATURE IMPORTANCE
+importance = pd.Series(
+    rf_model.feature_importances_, index=X.columns
+).sort_values()
+importance.plot(kind="barh", figsize=(8, 5))
+plt.title("Random Forest Feature Importance")
+plt.xlabel("Relative importance")
+plt.tight_layout()
+plt.show()
+ 
+# 12. SAVE PREDICTIONS
+prediction_output = pd.DataFrame({
+    "actual_target": y_test,
+    "linear_prediction": pred_lr,
+    "random_forest_prediction": pred_rf
+})
+prediction_output.to_csv("test_predictions.csv", index=False)
+print("Saved test_predictions.csv")
