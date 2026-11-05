@@ -1,0 +1,127 @@
+REAL-WORLD DATASET ANALYSIS PROJECT
+Dataset: Scikit-learn Diabetes dataset (442 observations, 10 baseline features)
+Purpose: cleaning, EDA, visualisation, interpretation, and an optional regression baseline.
+Requirements:
+    pip install pandas numpy matplotlib scikit-learn
+Run:
+    python diabetes_analysis.py
+The dataset is included as diabetes_dataset.csv. The script uses the local CSV if present;
+otherwise it loads the copy bundled with scikit-learn.
+"""
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+HERE = Path(__file__).resolve().parent
+DATA_PATH = HERE / "diabetes_dataset.csv"
+OUT_DIR = HERE / "generated_charts"
+OUT_DIR.mkdir(exist_ok=True)
+# 1. Load data
+if DATA_PATH.exists():
+    df = pd.read_csv(DATA_PATH)
+else:
+    df = load_diabetes(as_frame=True).frame.copy()
+print("\\n--- Dataset overview ---")
+print("Shape:", df.shape)
+print(df.head())
+print("\\nData types:\\n", df.dtypes)
+print("\\nSummary statistics:\\n", df.describe().T)
+# 2. Data-quality checks
+print("\\nMissing values by column:\\n", df.isna().sum())
+print("Total missing values:", int(df.isna().sum().sum()))
+print("Duplicate rows:", int(df.duplicated().sum()))
+# Preserve original data for audit; drop exact duplicates only if any are present.
+clean = df.copy()
+duplicate_count = int(clean.duplicated().sum())
+if duplicate_count:
+    clean = clean.drop_duplicates().copy()
+# Numeric conversion is explicit. Invalid strings become NaN, then are imputed by median.
+for col in clean.columns:
+    clean[col] = pd.to_numeric(clean[col], errors="coerce")
+numeric_cols = clean.select_dtypes(include=np.number).columns
+for col in numeric_cols:
+    if clean[col].isna().any():
+        clean[col] = clean[col].fillna(clean[col].median())
+print("\\nAfter basic cleaning:", clean.shape)
+print("Remaining missing values:", int(clean.isna().sum().sum()))
+# 3. Outlier screening with IQR. Flag for review rather than deleting valid observations.
+feature_cols = [c for c in clean.columns if c != "target"]
+outlier_report = {}
+for col in feature_cols:
+    q1 = clean[col].quantile(0.25)
+    q3 = clean[col].quantile(0.75)
+    iqr = q3 - q1
+    lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    outlier_report[col] = int(((clean[col] < lower) | (clean[col] > upper)).sum())
+print("\\nIQR outlier counts (screening only):\\n", pd.Series(outlier_report))
+# 4. Exploratory data analysis
+print("\\nTarget summary:\\n", clean["target"].describe())
+corr = clean.corr(numeric_only=True)
+print("\\nCorrelation with target:\\n", corr["target"].drop("target").sort_values(ascending=False))
+# Histogram: target distribution
+plt.figure(figsize=(7, 4.5))
+plt.hist(clean["target"], bins=24, edgecolor="black")
+plt.title("Distribution of Diabetes Progression Target")
+plt.xlabel("Target value (relative progression measure)")
+plt.ylabel("Number of patients")
+plt.tight_layout()
+plt.savefig(OUT_DIR / "target_distribution.png", dpi=180)
+plt.close()
+# Correlation heatmap
+plt.figure(figsize=(8.5, 6.5))
+im = plt.imshow(corr, aspect="auto", cmap="coolwarm", vmin=-1, vmax=1)
+plt.colorbar(im, label="Pearson correlation")
+plt.xticks(range(len(corr.columns)), corr.columns, rotation=60, ha="right", fontsize=8)
+plt.yticks(range(len(corr.index)), corr.index, fontsize=8)
+plt.title("Correlation Heatmap")
+plt.tight_layout()
+plt.savefig(OUT_DIR / "correlation_heatmap.png", dpi=180)
+plt.close()
+# Scatter plot with linear trend line
+plt.figure(figsize=(7, 4.5))
+plt.scatter(clean["bmi"], clean["target"], alpha=0.65)
+coef = np.polyfit(clean["bmi"], clean["target"], 1)
+x_line = np.linspace(clean["bmi"].min(), clean["bmi"].max(), 100)
+plt.plot(x_line, np.polyval(coef, x_line))
+plt.title(f"BMI vs Target (r = {corr.loc['bmi', 'target']:.2f})")
+plt.xlabel("BMI (standardized feature)")
+plt.ylabel("Target value")
+plt.tight_layout()
+plt.savefig(OUT_DIR / "bmi_vs_target.png", dpi=180)
+plt.close()
+# Box plots of selected features
+selected = ["age", "bmi", "bp", "s1", "s5"]
+plt.figure(figsize=(8, 4.5))
+plt.boxplot([clean[c] for c in selected], tick_labels=selected)
+plt.title("Box Plots of Selected Features")
+plt.ylabel("Standardized feature value")
+plt.tight_layout()
+plt.savefig(OUT_DIR / "feature_boxplots.png", dpi=180)
+plt.close()
+# Absolute correlations bar chart
+abs_corr = corr["target"].drop("target").abs().sort_values()
+plt.figure(figsize=(7, 4.5))
+plt.barh(abs_corr.index, abs_corr.values)
+plt.title("Absolute Correlation with Target")
+plt.xlabel("Absolute Pearson correlation")
+plt.tight_layout()
+plt.savefig(OUT_DIR / "target_correlations.png", dpi=180)
+plt.close()
+# 5. Optional baseline model. This is an educational baseline, not a clinical tool.
+X = clean[feature_cols]
+y = clean["target"]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.20, random_state=42
+)
+model = LinearRegression()
+model.fit(X_train, y_train)
+pred = model.predict(X_test)
+print("\\n--- Linear regression test-set metrics ---")
+print("MAE:", round(mean_absolute_error(y_test, pred), 2))
+print("RMSE:", round(np.sqrt(mean_squared_error(y_test, pred)), 2))
+print("R-squared:", round(r2_score(y_test, pred), 3))
+print(f"\\nCharts saved in: {OUT_DIR}")
